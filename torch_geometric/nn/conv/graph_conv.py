@@ -1,11 +1,11 @@
 import torch
 from torch.nn import Parameter
-from torch_geometric.utils import remove_self_loops, scatter_
+from torch_geometric.nn.conv import MessagePassing
 
 from ..inits import uniform
 
 
-class GraphConv(torch.nn.Module):
+class GraphConv(MessagePassing):
     r"""The graph neural network operator from the `"Weisfeiler and Leman Go
     Neural: Higher-order Graph Neural Networks"
     <https://arxiv.org/abs/1810.02244>`_ paper
@@ -29,36 +29,27 @@ class GraphConv(torch.nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.aggr = aggr
-        self.weight = Parameter(torch.Tensor(in_channels, out_channels))
-        self.root = Parameter(torch.Tensor(in_channels, out_channels))
 
-        if bias:
-            self.bias = Parameter(torch.Tensor(out_channels))
-        else:
-            self.register_parameter('bias', None)
+        self.weight = Parameter(torch.Tensor(in_channels, out_channels))
+        self.lin = torch.nn.Linear(in_channels, out_channels, bias=bias)
 
         self.reset_parameters()
 
     def reset_parameters(self):
         size = self.in_channels
         uniform(size, self.weight)
-        uniform(size, self.root)
-        uniform(size, self.bias)
+        self.lin.reset_parameters()
 
     def forward(self, x, edge_index):
         """"""
-        x = x.unsqueeze(-1) if x.dim() == 1 else x
-        edge_index, _ = remove_self_loops(edge_index)
-        row, col = edge_index
+        h = torch.matmul(x, self.weight)
+        return self.propagate(self.aggr, edge_index, x=x, h=h)
 
-        out = torch.mm(x, self.weight)
-        out = scatter_(self.aggr, out[col], row, dim_size=x.size(0))
-        out = out + torch.mm(x, self.root)
+    def message(self, h_j):
+        return h_j
 
-        if self.bias is not None:
-            out = out + self.bias
-
-        return out
+    def update(self, aggr_out, x):
+        return aggr_out + self.lin(x)
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,

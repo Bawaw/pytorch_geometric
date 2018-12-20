@@ -1,7 +1,6 @@
 import torch
 from torch.nn import Parameter
 from torch_scatter import scatter_add
-from torch_geometric.utils import remove_self_loops, add_self_loops
 
 from ..inits import uniform, reset
 
@@ -41,8 +40,8 @@ class GMMConv(torch.nn.Module):
         self.out_channels = out_channels
         self.dim = dim
 
-        self.mu = Parameter(in_channels, dim)
-        self.sigma = Parameter(in_channels, dim)
+        self.mu = Parameter(torch.Tensor(in_channels, dim))
+        self.sigma = Parameter(torch.Tensor(in_channels, dim))
         self.lin = torch.nn.Linear(in_channels, out_channels, bias=bias)
 
         self.reset_parameters()
@@ -50,21 +49,18 @@ class GMMConv(torch.nn.Module):
     def reset_parameters(self):
         size = self.in_channels
         uniform(size, self.mu)
-        uniform(size, self.cov)
+        uniform(size, self.sigma)
         reset(self.lin)
 
     def forward(self, x, edge_index, pseudo):
         """"""
         # See https://github.com/shchur/gnn-benchmark for the reference
         # TensorFlow implementation.
-        edge_index, _ = remove_self_loops(edge_index)
-        edge_index = add_self_loops(edge_index, num_nodes=x.size(0))
-
         x = x.unsqueeze(-1) if x.dim() == 1 else x
         pseudo = pseudo.unsqueeze(-1) if pseudo.dim() == 1 else pseudo
         row, col = edge_index
 
-        F, (E, D) = x.size(0), pseudo.size()
+        F, (E, D) = x.size(1), pseudo.size()
 
         gaussian = -0.5 * (pseudo.view(E, 1, D) - self.mu.view(1, F, D))**2
         gaussian = torch.exp(gaussian / (1e-14 + self.sigma.view(1, F, D)**2))
